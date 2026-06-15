@@ -4,4 +4,4 @@ numpy
 scipy
 matplotlib
 pillow
-streamlit-drawable-canvas==0.9.5
+streamlit-drawable-canvas==0.9.3
