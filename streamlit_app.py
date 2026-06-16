@@ -70,7 +70,7 @@ col_img, col_ctrl = st.columns([3, 2])
 
 with col_img:
     img_rgb = fb.get_original_image()
-    pil_img = Image.fromarray(img_rgb)
+    pil_img = Image.fromarray(img_rgb).convert("RGB")
 
     # 限制显示宽度适配列宽，缩放坐标还原为原始图像像素
     display_w = min(w, 650)
