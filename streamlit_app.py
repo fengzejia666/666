@@ -71,25 +71,58 @@ col_img, col_ctrl = st.columns([3, 2])
 with col_img:
     img_rgb = fb.get_original_image()
     
-    # 确保图片是 uint8 RGB
+    # 调试信息
+    st.write(f"图片形状: {img_rgb.shape}, 类型: {img_rgb.dtype}")
+    
+    # 确保图片格式正确
     if img_rgb.dtype != np.uint8:
-        img_rgb = (img_rgb * 255).astype(np.uint8) if img_rgb.max() <= 1 else img_rgb.astype(np.uint8)
+        if img_rgb.max() <= 1.0:
+            img_rgb = (img_rgb * 255).astype(np.uint8)
+        else:
+            img_rgb = img_rgb.astype(np.uint8)
     
+    # 确保是RGB三通道
     if len(img_rgb.shape) == 2:
-        img_rgb = np.stack([img_rgb] * 3, axis=-1)
+        img_rgb = np.stack([img_rgb, img_rgb, img_rgb], axis=2)
+    elif img_rgb.shape[2] == 4:
+        img_rgb = img_rgb[:, :, :3]
     
-    # 直接传入 numpy 数组，不转换成 PIL
-    canvas = st_canvas(
-        background_image=img_rgb,
-        drawing_mode="point" if not st.session_state.calibrated else "transform",
-        stroke_width=3,
-        stroke_color="#ff3333",
-        point_display_radius=5,
-        key="calib_canvas",
-        width=display_w,
-        height=display_h,
-    )
-
+    # 直接显示图片测试
+    st.image(img_rgb, caption="测试显示", use_column_width=True)
+    
+    display_w = min(w, 650)
+    display_h = int(h * display_w / w)
+    scale_x = w / display_w
+    scale_y = h / display_h
+    
+    # 使用正确的参数名
+    try:
+        canvas = st_canvas(
+            background_image=img_rgb,
+            drawing_mode="point" if not st.session_state.calibrated else "transform",
+            stroke_width=3,
+            stroke_color="#ff3333",
+            point_display_radius=5,
+            key="calib_canvas",
+            width=display_w,
+            height=display_h,
+            update_streamlit=True,  # 添加这个
+        )
+    except Exception as e:
+        st.error(f"Canvas 创建错误: {e}")
+        # 备用方案：尝试不同的参数名
+        canvas = st_canvas(
+            background_image=img_rgb,
+            drawing_mode="point" if not st.session_state.calibrated else "transform",
+            stroke_width=3,
+            stroke_color="#ff3333",
+            point_display_radius=5,
+            key="calib_canvas",
+            canvas_width=display_w,  # 尝试不同的参数名
+            canvas_height=display_h,
+            update_streamlit=True,
+        )
+    
     if not st.session_state.calibrated:
         raw_points = []
         if canvas.json_data is not None:
