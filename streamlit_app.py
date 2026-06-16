@@ -70,15 +70,17 @@ col_img, col_ctrl = st.columns([3, 2])
 
 with col_img:
     img_rgb = fb.get_original_image()
-    pil_img = Image.fromarray(img_rgb).convert("RGB")
+    pil_img = Image.fromarray(img_rgb)
 
-    # 限制显示宽度适配列宽，缩放坐标还原为原始图像像素
+    
+    st.write("PIL模式:", pil_img.mode)
+    st.image(pil_img, caption="PIL测试")
+
     display_w = min(w, 650)
     display_h = int(h * display_w / w)
+
     st.write("原图尺寸:", pil_img.size)
     st.write("Canvas尺寸:", (display_w, display_h))
-    scale_x = w / display_w
-    scale_y = h / display_h
 
     canvas = st_canvas(
         background_image=pil_img,
