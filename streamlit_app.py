@@ -77,14 +77,14 @@ with col_img:
     st.image(pil_img, caption="PIL测试")
 
     display_w = min(w, 650)
-display_h = int(h * display_w / w)
+    display_h = int(h * display_w / w)
 
-scale_x = w / display_w
-scale_y = h / display_h
+    scale_x = w / display_w
+    scale_y = h / display_h
 
-canvas_img = pil_img.resize(
+    canvas_img = pil_img.resize(
     (display_w, display_h)
-)
+   )
     canvas = st_canvas(
         background_image=pil_img,
         drawing_mode="point" if not st.session_state.calibrated else "transform",
