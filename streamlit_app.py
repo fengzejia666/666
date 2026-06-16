@@ -75,6 +75,8 @@ with col_img:
     # 限制显示宽度适配列宽，缩放坐标还原为原始图像像素
     display_w = min(w, 650)
     display_h = int(h * display_w / w)
+    st.write("原图尺寸:", pil_img.size)
+st.write("Canvas尺寸:", (display_w, display_h))
     scale_x = w / display_w
     scale_y = h / display_h
 
