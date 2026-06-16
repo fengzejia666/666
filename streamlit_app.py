@@ -72,10 +72,6 @@ with col_img:
     img_rgb = fb.get_original_image()
     pil_img = Image.fromarray(img_rgb)
 
-    
-    st.write("PIL模式:", pil_img.mode)
-    st.image(pil_img, caption="PIL测试")
-
     display_w = min(w, 650)
     display_h = int(h * display_w / w)
 
