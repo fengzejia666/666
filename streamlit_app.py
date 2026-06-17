@@ -4,7 +4,7 @@
 """
 
 import streamlit as st
-from streamlit_drawable_canvas import st_canvas
+import streamlit.components.v1 as components
 from fringe_core import FringeBridge
 from PIL import Image
 import numpy as np
@@ -12,6 +12,8 @@ import matplotlib.pyplot as plt
 import tempfile
 import os
 import hashlib
+import base64
+import io
 
 st.set_page_config(page_title="条纹间距测量", layout="wide")
 st.title("双缝干涉条纹间距测量工具")
@@ -23,6 +25,7 @@ for key, default in [
     ("calibrated", False),
     ("last_result", None),
     ("temp_path", None),
+    ("_canvas_clicks", []),
 ]:
     if key not in st.session_state:
         st.session_state[key] = default
@@ -49,6 +52,7 @@ if uploaded is not None:
             st.session_state.calib_points = []
             st.session_state.calibrated = False
             st.session_state.last_result = None
+            st.session_state._canvas_clicks = []
         except Exception as e:
             st.sidebar.error(f"加载失败: {e}")
 
@@ -63,7 +67,7 @@ if not fb.has_image:
     st.info("👈 请在左侧上传条纹图片")
     st.stop()
 
-# ==================== 标定: canvas 始终渲染 ====================
+# ==================== 标定: 自定义 canvas 组件 ====================
 st.subheader("📏 2. 标定")
 
 col_img, col_ctrl = st.columns([3, 2])
@@ -71,35 +75,139 @@ col_img, col_ctrl = st.columns([3, 2])
 with col_img:
     img_rgb = fb.get_original_image()
     pil_img = Image.fromarray(img_rgb)
+
+    # 图片转 base64
+    buf = io.BytesIO()
+    pil_img.save(buf, format="PNG")
+    img_b64 = base64.b64encode(buf.getvalue()).decode()
+
+    # 限制显示宽度
     display_w = min(w, 650)
     display_h = int(h * display_w / w)
     scale_x = w / display_w
     scale_y = h / display_h
-    canvas_img = pil_img.resize(    
-(display_w, display_h)   
-)
-    canvas = st_canvas(
-        background_image=pil_img,
-        drawing_mode="point" if not st.session_state.calibrated else "transform",
-        stroke_width=3,
-        stroke_color="#ff3333",
-        point_display_radius=5,
-        key="calib_canvas",
-        width=display_w,
-        height=display_h,    
-)
-    
-    if not st.session_state.calibrated:
-        raw_points = []
-        if canvas.json_data is not None:
-            objs = canvas.json_data.get("objects", [])
+
+    # 自建 HTML Canvas 组件 — 零依赖
+    canvas_html = f"""
+    <style>
+        #fringe-canvas {{ cursor: crosshair; display: block; }}
+        #fringe-container {{ position: relative; display: inline-block; }}
+    </style>
+    <div id="fringe-container">
+        <canvas id="fringe-canvas"></canvas>
+    </div>
+    <script>
+    (function() {{
+        const canvas = document.getElementById('fringe-canvas');
+        const ctx = canvas.getContext('2d');
+        const w = {display_w}, h = {display_h};
+        canvas.width = w;
+        canvas.height = h;
+
+        const img = new Image();
+        img.onload = function() {{
+            ctx.drawImage(img, 0, 0, w, h);
+            redrawAll();
+        }};
+        img.src = "data:image/png;base64,{img_b64}";
+
+        let clicks = [];
+
+        // 加载已有点击
+        const existing = {st.session_state._canvas_clicks};
+        if (existing.length > 0) {{
+            clicks = existing.map(p => [p[0], p[1]]);
+            redrawAll();
+            sendBack();
+        }}
+
+        function redrawAll() {{
+            ctx.drawImage(img, 0, 0, w, h);
+            const colors = ['#ff3333', '#ff9632'];
+            clicks.forEach(function(pt, i) {{
+                const r = 6;
+                ctx.beginPath();
+                ctx.arc(pt[0], pt[1], r, 0, 2*Math.PI);
+                ctx.strokeStyle = colors[i % 2];
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                ctx.fillStyle = colors[i % 2] + '55';
+                ctx.fill();
+                // 十字线
+                const cs = r + 4;
+                ctx.beginPath();
+                ctx.moveTo(pt[0] - cs, pt[1]);
+                ctx.lineTo(pt[0] + cs, pt[1]);
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(pt[0], pt[1] - cs);
+                ctx.lineTo(pt[0], pt[1] + cs);
+                ctx.stroke();
+            }});
+            if (clicks.length >= 2) {{
+                ctx.beginPath();
+                ctx.setLineDash([5, 5]);
+                ctx.moveTo(clicks[0][0], clicks[0][1]);
+                ctx.lineTo(clicks[1][0], clicks[1][1]);
+                ctx.strokeStyle = '#50ff50';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                ctx.setLineDash([]);
+            }}
+        }}
+
+        canvas.addEventListener('click', function(e) {{
+            if (clicks.length >= 2) {{
+                // 重置: 超过 2 个点则清空重新开始
+                clicks = [];
+                redrawAll();
+            }}
+            const rect = canvas.getBoundingClientRect();
+            const sx = e.clientX - rect.left;
+            const sy = e.clientY - rect.top;
+            // 修正: 浏览器的 devicePixelRatio 可能影响坐标
+            clicks.push([sx, sy]);
+            redrawAll();
+            sendBack();
+        }});
+
+        function sendBack() {{
+            const msg = JSON.stringify({{clicks: clicks}});
+            // 使用 data URL 和 iframe 通信
+            window.parent.postMessage({{
+                isStreamlitMessage: true,
+                type: 'streamlit:setComponentValue',
+                value: msg
+            }}, '*');
+        }}
+    }})();
+    </script>
+    """
+
+    result = components.html(canvas_html, height=display_h + 20)
+
+    # 解析自定义组件返回的坐标
+    if result is not None and isinstance(result, str):
+        try:
+            data = eval(result)  # JSON parsed via Python
+            new_clicks = data.get("clicks", [])
+        except Exception:
+            try:
+                import json
+                data = json.loads(result)
+                new_clicks = data.get("clicks", [])
+            except Exception:
+                new_clicks = []
+
+        if new_clicks:
+            st.session_state._canvas_clicks = new_clicks
+            # 缩放回原图坐标
             raw_points = [
-                (int(float(o["left"]) * scale_x),
-                 int(float(o["top"]) * scale_y))
-                for o in objs[:2]
+                (int(float(pt[0]) * scale_x), int(float(pt[1]) * scale_y))
+                for pt in new_clicks[:2]
             ]
-        if raw_points:
-            st.session_state.calib_points = raw_points
+            if raw_points:
+                st.session_state.calib_points = raw_points
 
 with col_ctrl:
     pts = st.session_state.calib_points
@@ -126,7 +234,7 @@ with col_ctrl:
             f"比例尺: {fb.pixel_per_mm:.2f} px/mm"
         )
 
-    # ---- 标定操作按钮: 始终渲染, 用固定 key ----
+    # ---- 标定操作按钮 ----
     actual_mm = st.number_input(
         "实际距离 (mm)", min_value=0.001, value=10.0, step=1.0, format="%.3f",
         key="actual_mm"
@@ -150,9 +258,11 @@ with col_ctrl:
         if st.session_state.calibrated:
             st.session_state.calibrated = False
             st.session_state.calib_points = []
+            st.session_state._canvas_clicks = []
             st.session_state.last_result = None
         else:
             st.session_state.calib_points = []
+            st.session_state._canvas_clicks = []
 
 st.markdown("---")
 
@@ -161,7 +271,6 @@ st.subheader("🔬 3. 分析")
 
 col_img2, col_ctrl2 = st.columns([3, 2])
 
-# 分析参数滑块始终渲染
 with col_ctrl2:
     st.markdown("**分析参数**")
     clahe_clip = st.slider("对比度增强 (CLAHE)", 0.5, 10.0, 2.0, 0.5, key="clahe_clip")
@@ -169,7 +278,6 @@ with col_ctrl2:
     prominence = st.slider("峰值灵敏度", 0.005, 0.5, 0.05, 0.005, format="%.3f", key="prominence")
     min_dist = st.slider("最小峰间距 (px)", 3, 200, 10, 1, key="min_dist")
 
-    # 执行分析按钮始终渲染
     btn_analyze = st.button("🚀 执行分析", key="btn_analyze")
     if btn_analyze and st.session_state.calibrated:
         try:
@@ -183,7 +291,6 @@ with col_ctrl2:
 
     st.markdown("---")
 
-    # 结果区域
     r = st.session_state.last_result
     if r is not None:
         st.markdown("### 📊 测量结果")
@@ -201,7 +308,6 @@ with col_ctrl2:
         else:
             st.info("请先完成标定（上传图片 → 点击两点 → 输入实际距离 → 应用标定）")
 
-# ---- 结果展示 ----
 with col_img2:
     r = st.session_state.last_result
     if r is not None:
@@ -222,7 +328,6 @@ with col_img2:
             fig.tight_layout()
             st.pyplot(fig)
 
-        # 导出按钮
         if st.button("📥 导出 TXT", key="btn_export"):
             txt = f"""双缝干涉条纹间距测量结果
 {'=' * 50}
