@@ -4,4 +4,4 @@ numpy
 scipy
 matplotlib
 pillow
-streamlit-drawable-canvas-fix
+streamlit-image-coordinates
