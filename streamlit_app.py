@@ -80,7 +80,7 @@ with col_img:
     scale_y = h / display_h
 
     canvas = st_canvas(
-        background_image=pil_img,
+        background_image=pil_img.resize((display_w, display_h)),
         drawing_mode="point" if not st.session_state.calibrated else "transform",
         stroke_width=3,
         stroke_color="#ff3333",
