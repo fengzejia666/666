@@ -4,7 +4,7 @@
 """
 
 import streamlit as st
-import streamlit.components.v1 as components
+from streamlit_drawable_canvas import st_canvas
 from fringe_core import FringeBridge
 from PIL import Image
 import numpy as np
@@ -12,8 +12,6 @@ import matplotlib.pyplot as plt
 import tempfile
 import os
 import hashlib
-import base64
-import io
 
 st.set_page_config(page_title="条纹间距测量", layout="wide")
 st.title("双缝干涉条纹间距测量工具")
@@ -25,7 +23,7 @@ for key, default in [
     ("calibrated", False),
     ("last_result", None),
     ("temp_path", None),
-    ("_canvas_clicks", []),
+
 ]:
     if key not in st.session_state:
         st.session_state[key] = default
@@ -50,7 +48,6 @@ if uploaded is not None:
             fb.load_image(new_path)
             st.session_state.temp_path = new_path
             st.session_state.calib_points = []
-            st.session_state._canvas_clicks = []
             st.session_state.calibrated = False
             st.session_state.last_result = None
         except Exception as e:
@@ -82,81 +79,28 @@ with col_img:
     scale_x = w / display_w
     scale_y = h / display_h
 
-    # 图片转 base64
-    buf = io.BytesIO()
-    pil_img.resize((display_w, display_h)).save(buf, format="PNG")
-    img_b64 = base64.b64encode(buf.getvalue()).decode()
+    canvas = st_canvas(
+        background_image=pil_img,
+        drawing_mode="point" if not st.session_state.calibrated else "transform",
+        stroke_width=3,
+        stroke_color="#ff3333",
+        point_display_radius=5,
+        key="calib_canvas",
+        width=display_w,
+        height=display_h,
+    )
 
-    existing = st.session_state._canvas_clicks
-    existing_json = str([[p[0], p[1]] for p in existing]) if existing else "[]"
-
-    # 自建 HTML Canvas — 零第三方依赖
-    canvas_html = f"""
-    <style>#fringe-canvas{{cursor:crosshair;display:block;}}</style>
-    <canvas id="fringe-canvas"></canvas>
-    <script>
-    (function(){{
-        var c=document.getElementById('fringe-canvas');
-        c.width={display_w};c.height={display_h};
-        var x=c.getContext('2d');
-        var img=new Image();
-        img.onload=function(){{
-            x.drawImage(img,0,0);
-            drawAll();
-        }};
-        img.src="data:image/png;base64,{img_b64}";
-        var clicks={existing_json};
-        function drawAll(){{
-            x.drawImage(img,0,0);
-            for(var i=0;i<clicks.length;i++){{
-                var r=6,cs=r+4;
-                x.beginPath();
-                x.arc(clicks[i][0],clicks[i][1],r,0,6.28);
-                x.strokeStyle=i?'#ff9632':'#ff3333';
-                x.lineWidth=2;x.stroke();
-                x.fillStyle=x.strokeStyle+'55';x.fill();
-                x.beginPath();
-                x.moveTo(clicks[i][0]-cs,clicks[i][1]);x.lineTo(clicks[i][0]+cs,clicks[i][1]);
-                x.moveTo(clicks[i][0],clicks[i][1]-cs);x.lineTo(clicks[i][0],clicks[i][1]+cs);
-                x.stroke();
-            }}
-            if(clicks.length>1){{
-                x.beginPath();x.setLineDash([5,5]);
-                x.moveTo(clicks[0][0],clicks[0][1]);x.lineTo(clicks[1][0],clicks[1][1]);
-                x.strokeStyle='#50ff50';x.lineWidth=2;x.stroke();x.setLineDash([]);
-            }}
-        }}
-        c.onclick=function(e){{
-            var r=c.getBoundingClientRect();
-            var sx=e.clientX-r.left,sy=e.clientY-r.top;
-            if(clicks.length>1)clicks=[];
-            clicks.push([Math.round(sx),Math.round(sy)]);
-            drawAll();
-            window.parent.postMessage({{
-                isStreamlitMessage:true,
-                type:'streamlit:setComponentValue',
-                value:JSON.stringify({{clicks:clicks}})
-            }},'*');
-        }};
-    }})();
-    </script>
-    """
-
-    result = components.html(canvas_html, height=display_h + 10)
-
-    if result and isinstance(result, str):
-        try:
-            import json as _json
-            data = _json.loads(result)
-            new_clicks = data.get("clicks", [])
-            if new_clicks:
-                st.session_state._canvas_clicks = new_clicks
-                st.session_state.calib_points = [
-                    (int(float(pt[0]) * scale_x), int(float(pt[1]) * scale_y))
-                    for pt in new_clicks[:2]
-                ]
-        except Exception:
-            pass
+    if not st.session_state.calibrated:
+        raw_points = []
+        if canvas.json_data is not None:
+            objs = canvas.json_data.get("objects", [])
+            raw_points = [
+                (int(float(o["left"]) * scale_x),
+                 int(float(o["top"]) * scale_y))
+                for o in objs[:2]
+            ]
+        if raw_points:
+            st.session_state.calib_points = raw_points
 
 with col_ctrl:
     pts = st.session_state.calib_points
@@ -207,11 +151,9 @@ with col_ctrl:
         if st.session_state.calibrated:
             st.session_state.calibrated = False
             st.session_state.calib_points = []
-            st.session_state._canvas_clicks = []
             st.session_state.last_result = None
         else:
             st.session_state.calib_points = []
-            st.session_state._canvas_clicks = []
 
 st.markdown("---")
 
