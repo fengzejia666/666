@@ -86,8 +86,6 @@ with col_img:
         stroke_color="#ff3333",
         point_display_radius=5,
         key="calib_canvas",
-        width=display_w,
-        height=display_h,
     )
 
     if not st.session_state.calibrated:
