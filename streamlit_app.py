@@ -4,7 +4,7 @@
 """
 
 import streamlit as st
-from streamlit_drawable_canvas import st_canvas
+from streamlit_image_coordinates import streamlit_image_coordinates
 from fringe_core import FringeBridge
 from PIL import Image
 import numpy as np
@@ -23,7 +23,6 @@ for key, default in [
     ("calibrated", False),
     ("last_result", None),
     ("temp_path", None),
-
 ]:
     if key not in st.session_state:
         st.session_state[key] = default
@@ -64,41 +63,35 @@ if not fb.has_image:
     st.info("👈 请在左侧上传条纹图片")
     st.stop()
 
-# ==================== 标定: 自定义 canvas 组件 ====================
+# ==================== 标定 ====================
 st.subheader("📏 2. 标定")
 
 col_img, col_ctrl = st.columns([3, 2])
 
 with col_img:
     img_rgb = fb.get_original_image()
-    pil_img = Image.fromarray(img_rgb)
+    pil_img = Image.fromarray(img_rgb).convert("RGB")
 
-    # 限制显示宽度，缩放坐标还原为原始图像像素
     display_w = min(w, 650)
     display_h = int(h * display_w / w)
     scale_x = w / display_w
     scale_y = h / display_h
 
-    canvas = st_canvas(
-        background_image=pil_img.resize((display_w, display_h)),
-        drawing_mode="point" if not st.session_state.calibrated else "transform",
-        stroke_width=3,
-        stroke_color="#ff3333",
-        point_display_radius=5,
-        key="calib_canvas",
-    )
-
+    # 在图片上点击获取坐标
     if not st.session_state.calibrated:
-        raw_points = []
-        if canvas.json_data is not None:
-            objs = canvas.json_data.get("objects", [])
-            raw_points = [
-                (int(float(o["left"]) * scale_x),
-                 int(float(o["top"]) * scale_y))
-                for o in objs[:2]
-            ]
-        if raw_points:
-            st.session_state.calib_points = raw_points
+        st.caption("👆 在图片上点击选取标定点")
+        value = streamlit_image_coordinates(pil_img, key="calib_img", width=display_w)
+
+        if value is not None:
+            pt = (int(value["x"] * scale_x), int(value["y"] * scale_y))
+            pts = st.session_state.calib_points
+            if len(pts) == 0:
+                st.session_state.calib_points = [pt]
+            elif len(pts) == 1 and pt != pts[0]:
+                st.session_state.calib_points = [pts[0], pt]
+    else:
+        # 标定完成后只显示图片
+        st.image(pil_img, width=display_w)
 
 with col_ctrl:
     pts = st.session_state.calib_points
@@ -125,7 +118,6 @@ with col_ctrl:
             f"比例尺: {fb.pixel_per_mm:.2f} px/mm"
         )
 
-    # ---- 标定操作按钮 ----
     actual_mm = st.number_input(
         "实际距离 (mm)", min_value=0.001, value=10.0, step=1.0, format="%.3f",
         key="actual_mm"
@@ -155,7 +147,7 @@ with col_ctrl:
 
 st.markdown("---")
 
-# ==================== 分析: 始终渲染 ====================
+# ==================== 分析 ====================
 st.subheader("🔬 3. 分析")
 
 col_img2, col_ctrl2 = st.columns([3, 2])
